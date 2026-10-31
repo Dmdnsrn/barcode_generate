@@ -144,8 +144,15 @@ body[data-mode="label"] .only-grid { display: none; }
 }
 #sheet.noborder .bc { border-color: transparent; }
 #sheet.label .bc { width: calc(var(--lw) * 1mm); height: calc(var(--lh) * 1mm); padding: 1.5mm; }
+.bc { flex-direction: column; }
+.bc[title] { cursor: copy; }
 .bc svg { display: block; width: 100%; height: auto; max-height: 48mm; }
-#sheet.label .bc svg { height: 100%; max-height: none; }
+#sheet.label .bc svg { height: auto; flex: 1 1 0; min-height: 0; max-height: none; }
+.bc .cap { font-size: 11px; line-height: 1.2; max-width: 100%; margin-top: 1mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip { padding: 1px 10px; border-radius: 99px; font-size: 12.5px; border: 1px solid var(--line); }
+.chip.ok { color: var(--ok); border-color: var(--ok); }
+.chip.warn { color: #9a6700; border-color: #9a6700; }
+.chip.bad { color: var(--danger); border-color: var(--danger); }
 .bc .idx {
   position: absolute; top: 3px; left: 5px; font-family: var(--mono); font-size: 10px; color: #8b97a3; pointer-events: none;
 }
@@ -172,6 +179,8 @@ body[data-mode="label"] .only-grid { display: none; }
   .desk { background: none; border: 0; padding: 0; min-height: 0; }
   #sheet .bc { border-radius: 0; }
   #sheet:not(.noborder) .bc { border: .2mm dashed #999; }
+  #sheet:not(.label) { display: flex; flex-wrap: wrap; gap: calc(var(--gap, 4) * 1mm); }
+  #sheet:not(.label) .bc { width: calc((100% - (var(--cols, 2) - 1) * var(--gap, 4) * 1mm) / var(--cols, 2) - .01mm); }
   #sheet.label { display: block; }
   #sheet.label .bc { break-after: page; page-break-after: always; border: 0 !important; }
   #sheet.label .bc:last-child { break-after: auto; page-break-after: auto; }
@@ -214,7 +223,7 @@ body[data-mode="label"] .only-grid { display: none; }
         <div class="row">
           <label class="check"><input type="checkbox" data-s="dedupe"> Давхардсаныг хасах</label>
         </div>
-        <p class="hint" style="margin:8px 0 0">.txt эсвэл .csv файлын эхний баганыг уншина.</p>
+        <p class="hint" style="margin:8px 0 0">Мөр бүр «дугаар; тайлбар» хэлбэртэй байж болно, тайлбар barcode-ын доор хэвлэгдэнэ. .csv файлын эхний хоёр баганыг уншина.</p>
       </div>
 
       <div id="paneRange" hidden>
@@ -298,6 +307,7 @@ body[data-mode="label"] .only-grid { display: none; }
           </div>
         </div>
 
+        <div class="field only-label"><label for="fPreset">Шошгоны хэмжээ</label><select id="fPreset"><option value="">Өөр хэмжээ</option><option value="40x20">40 × 20 мм</option><option value="50x30">50 × 30 мм</option><option value="60x30">60 × 30 мм</option><option value="100x50">100 × 50 мм</option><option value="100x150">100 × 150 мм (илгээмжийн шошго)</option></select></div>
         <div class="grid2 only-label">
           <div class="field">
             <label for="fLW">Шошгоны өргөн (мм)</label>
@@ -321,6 +331,7 @@ body[data-mode="label"] .only-grid { display: none; }
         <span>Barcode: <b id="sCount">0</b></span>
         <span id="sDupWrap" hidden>Давхардал хасагдсан: <b id="sDup">0</b></span>
         <span class="bad" id="sBadWrap" hidden>Алдаатай: <b id="sBad">0</b></span>
+        <span class="chip" id="sScan" hidden></span>
       </div>
       <div class="row" style="margin:0">
         <button class="btn" id="btnCopyBad" type="button" hidden>Алдаатайг хуулах</button>
@@ -398,6 +409,8 @@ body[data-mode="label"] .only-grid { display: none; }
       b.setAttribute("aria-pressed", String(b.dataset.mode === settings.mode));
     });
     document.body.dataset.mode = settings.mode;
+    var pv = settings.labelW + "x" + settings.labelH;
+    $("fPreset").value = [].some.call($("fPreset").options, function (o) { return o.value === pv; }) ? pv : "";
     applyLayout();
   }
 
@@ -442,6 +455,18 @@ body[data-mode="label"] .only-grid { display: none; }
       save("bc_settings", JSON.stringify(settings));
       syncUI(); scheduleRender(0);
     });
+  });
+
+  $("fPreset").addEventListener("change", function () {
+    var p = this.value.split("x");
+    if (p.length !== 2) return;
+    settings.labelW = +p[0]; settings.labelH = +p[1];
+    save("bc_settings", JSON.stringify(settings)); syncUI(); scheduleRender(0);
+  });
+  sheet.addEventListener("click", function (e) {
+    var c = e.target.closest(".bc");
+    if (!c || !c.title || !navigator.clipboard) return;
+    navigator.clipboard.writeText(c.title).then(function () { toast("Хуулагдлаа: " + c.title); }, function () {});
   });
 
   /* ---------- tabs ---------- */
@@ -489,7 +514,7 @@ body[data-mode="label"] .only-grid { display: none; }
     if (!f) return;
     var reader = new FileReader();
     reader.onload = function () {
-      var lines = String(reader.result).split(/\r?\n/).map(function (l) { return l.split(/[,;\t]/)[0].replace(/^"|"$/g, "").trim(); }).filter(Boolean);
+      var lines = String(reader.result).split(/\r?\n/).map(function (l) { return l.split(/[,;\t]/).slice(0, 2).map(function (c) { return c.replace(/^"|"$/g, "").trim(); }).filter(Boolean).join("; "); }).filter(Boolean);
       var cur = input.value.replace(/\s+$/, "");
       input.value = (cur ? cur + "\n" : "") + lines.join("\n");
       onInputChanged(); toast(lines.length + " мөр уншлаа");
@@ -502,12 +527,16 @@ body[data-mode="label"] .only-grid { display: none; }
   input.addEventListener("input", onInputChanged);
 
   /* ---------- parse ---------- */
+  function splitLine(l) {
+    var m = l.match(/^([^;\t|]+)[;\t|]\s*(.*)$/);
+    return m ? { v: m[1].trim(), cap: m[2].trim() } : { v: l, cap: "" };
+  }
   function parseList() {
-    var raw = input.value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean);
+    var raw = input.value.split(/\r?\n/).map(function (x) { return splitLine(x.trim()); }).filter(function (x) { return x.v; });
     var dup = 0, list = raw;
     if (settings.dedupe) {
       var seen = new Set(); list = [];
-      raw.forEach(function (v) { if (seen.has(v)) dup++; else { seen.add(v); list.push(v); } });
+      raw.forEach(function (x) { if (seen.has(x.v)) dup++; else { seen.add(x.v); list.push(x); } });
     }
     var truncated = false;
     if (list.length > MAX_ITEMS) { list = list.slice(0, MAX_ITEMS); truncated = true; }
@@ -522,7 +551,8 @@ body[data-mode="label"] .only-grid { display: none; }
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
 
-  function makeItem(value, i) {
+  function makeItem(item, i) {
+    var value = item.v;
     var card = document.createElement("div");
     card.className = "bc";
     var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -534,11 +564,12 @@ body[data-mode="label"] .only-grid { display: none; }
       });
       fitSvg(svg);
       card.appendChild(svg);
+      if (item.cap) { var cp = document.createElement("div"); cp.className = "cap"; cp.textContent = item.cap; card.appendChild(cp); }
       var idx = document.createElement("span");
       idx.className = "idx"; idx.textContent = i + 1;
       card.appendChild(idx);
       card.title = value;
-      return { el: card, ok: true };
+      return { el: card, ok: true, w: svg.viewBox.baseVal.width, h: svg.viewBox.baseVal.height, cap: !!item.cap };
     } catch (err) {
       card.className = "bc err";
       var t = document.createElement("strong"); t.textContent = "Үүсгэх боломжгүй";
@@ -559,6 +590,23 @@ body[data-mode="label"] .only-grid { display: none; }
     $("btnCopyBad").hidden = !bad;
   }
 
+  /* Хэвлэхэд зураасны бодит өргөнийг тооцож, уншигдах эсэхийг үнэлнэ */
+  function updateScan(maxW, maxH, hasCap) {
+    var chip = $("sScan");
+    if (!maxW) { chip.hidden = true; return; }
+    var iw, ih;
+    if (settings.mode === "label") { iw = settings.labelW - 3; ih = settings.labelH - 3 - (hasCap ? 4 : 0); }
+    else {
+      var pw = settings.orient === "landscape" ? 297 : 210;
+      iw = (pw - 2 * settings.margin - (settings.cols - 1) * settings.gap) / settings.cols - 6; ih = 48;
+    }
+    var mm = settings.barWidth * Math.min(iw / maxW, ih / maxH);
+    var lvl = mm < 0.19 ? "bad" : mm < 0.25 ? "warn" : "ok";
+    chip.hidden = false;
+    chip.className = "chip " + lvl;
+    chip.textContent = "Хэвлэхэд зураас ≈ " + mm.toFixed(2) + " мм · " + (lvl === "bad" ? "хэт жижиг, уншигдахгүй байж магадгүй" : lvl === "warn" ? "хязгаарт" : "уншихад сайн");
+  }
+
   function render() {
     var token = ++renderToken;
     applyLayout();
@@ -569,10 +617,10 @@ body[data-mode="label"] .only-grid { display: none; }
     updateStats(list.length, parsed.dup, 0);
     $("btnPrint").disabled = list.length === 0;
     if (parsed.truncated) toast("Эхний " + MAX_ITEMS + " дугаарыг л үүсгэлээ.");
-    if (!list.length) { $("progress").classList.remove("on"); return; }
+    if (!list.length) { $("progress").classList.remove("on"); updateScan(0); return; }
 
     var prog = $("progress"), bar = $("progressBar");
-    var i = 0, bad = 0;
+    var i = 0, bad = 0, maxW = 0, maxH = 0, hasCap = false;
     var showProgress = list.length > CHUNK * 2;
     if (showProgress) prog.classList.add("on");
 
@@ -582,14 +630,14 @@ body[data-mode="label"] .only-grid { display: none; }
       var end = Math.min(i + CHUNK, list.length);
       for (; i < end; i++) {
         var r = makeItem(list[i], i);
-        if (!r.ok) { bad++; lastBad.push(r.value); }
+        if (!r.ok) { bad++; lastBad.push(r.value); } else { maxW = Math.max(maxW, r.w); maxH = Math.max(maxH, r.h); if (r.cap) hasCap = true; }
         frag.appendChild(r.el);
       }
       sheet.appendChild(frag);
       bar.style.width = (i / list.length * 100) + "%";
       updateStats(list.length, parsed.dup, bad);
       if (i < list.length) requestAnimationFrame(step);
-      else setTimeout(function () { if (token === renderToken) prog.classList.remove("on"); }, 250);
+      else { updateScan(maxW, maxH, hasCap); setTimeout(function () { if (token === renderToken) prog.classList.remove("on"); }, 250); }
     }
     requestAnimationFrame(step);
   }
